@@ -105,6 +105,22 @@ def split_multiline_cell(cell_value):
     return [line.strip() for line in str(cell_value).split('\n') if line.strip()]
 
 
+def clean_hostname(hostname):
+    """Remove timestamp from hostname (e.g., 'lu1app88_2018-02-08 17:52:14' -> 'lu1app88')"""
+    if pd.isna(hostname) or hostname == '':
+        return ''
+    hostname_str = str(hostname).strip()
+    # Remove timestamp pattern: _YYYY-MM-DD HH:MM:SS or similar
+    # Split by underscore and check if last part looks like a date
+    if '_' in hostname_str:
+        parts = hostname_str.split('_')
+        # Check if last part starts with a year pattern (19xx or 20xx)
+        if len(parts) > 1 and re.match(r'^(19|20)\d{2}-', parts[-1]):
+            # Remove the timestamp part
+            return '_'.join(parts[:-1])
+    return hostname_str
+
+
 def is_ip_in_range(ip_str, start_ip, end_ip):
     """Check if IP is in the range between start_ip and end_ip"""
     if not ip_str:
@@ -280,14 +296,35 @@ def enrich_with_cmdb(df, config):
     
     print(f"  Created CMDB lookup with {len(cmdb_lookup)} unique IPs")
     
+    # Track IPs not found in CMDB
+    ips_not_found = set()
+    
     # Enrich (convert extracted IP to lowercase for matching)
-    df['hostname'] = df['extracted_ip'].apply(lambda x: cmdb_lookup.get(x.lower() if x else '', {}).get('hostname', ''))
-    df['install_status'] = df['extracted_ip'].apply(lambda x: cmdb_lookup.get(x.lower() if x else '', {}).get('install_status', ''))
+    def get_hostname(ip):
+        if not ip:
+            return ''
+        ip_lower = ip.lower()
+        if ip_lower in cmdb_lookup:
+            hostname = cmdb_lookup[ip_lower].get('hostname', '')
+            return clean_hostname(hostname)
+        else:
+            ips_not_found.add(ip)
+            return ''
+    
+    def get_install_status(ip):
+        if not ip:
+            return ''
+        ip_lower = ip.lower()
+        return cmdb_lookup.get(ip_lower, {}).get('install_status', '')
+    
+    df['hostname'] = df['extracted_ip'].apply(get_hostname)
+    df['install_status'] = df['extracted_ip'].apply(get_install_status)
     
     matched = df['hostname'].notna() & (df['hostname'] != '')
     print(f"  Matched {matched.sum()} rows with CMDB ({matched.sum()/len(df)*100:.1f}%)")
+    print(f"  IPs not found: {len(ips_not_found)}")
     
-    return df
+    return df, ips_not_found
 
 
 def enrich_with_global_exit(df, config):
@@ -459,13 +496,18 @@ def main():
     df_step3 = expand_member_addrs(df_step2.copy(), config)
     
     # Step 4: Enrich with CMDB
-    df_step4 = enrich_with_cmdb(df_step3.copy(), config)
+    df_step4, ips_not_found = enrich_with_cmdb(df_step3.copy(), config)
     
     # Step 5: Enrich with Global Exit
     df_step5, hostnames_not_found = enrich_with_global_exit(df_step4.copy(), config)
     
     # Step 6: Create summary
     summary_df = create_summary_sheet(df_step5, config)
+    
+    # Create IPs not found sheet
+    ips_not_found_df = pd.DataFrame({
+        'IP_Address': sorted(list(ips_not_found))
+    })
     
     # Create hostnames not found sheet
     hostnames_not_found_df = pd.DataFrame({
@@ -479,8 +521,9 @@ def main():
         df_step2.to_excel(writer, sheet_name='2_After_Filters', index=False)
         df_step3.to_excel(writer, sheet_name='3_After_Expansion', index=False)
         df_step5.to_excel(writer, sheet_name='4_Final_Enriched', index=False)
-        hostnames_not_found_df.to_excel(writer, sheet_name='5_Hostnames_Not_Found', index=False)
-        summary_df.to_excel(writer, sheet_name='6_Summary', index=False)
+        ips_not_found_df.to_excel(writer, sheet_name='5_IPs_Not_Found_CMDB', index=False)
+        hostnames_not_found_df.to_excel(writer, sheet_name='6_Hostnames_Not_Found_GE', index=False)
+        summary_df.to_excel(writer, sheet_name='7_Summary', index=False)
     
     print(f"\n✓ Output written to: {config['output_file']}")
     print("\nSheets created:")
@@ -488,8 +531,9 @@ def main():
     print("  2. 2_After_Filters - Data after applying filters")
     print("  3. 3_After_Expansion - Data after expanding member_addrs")
     print("  4. 4_Final_Enriched - Final enriched data")
-    print("  5. 5_Hostnames_Not_Found - Hostnames not found in Global Exit")
-    print("  6. 6_Summary - VIP summary by groups")
+    print("  5. 5_IPs_Not_Found_CMDB - IPs not found in CMDB")
+    print("  6. 6_Hostnames_Not_Found_GE - Hostnames not found in Global Exit")
+    print("  7. 7_Summary - VIP summary by groups")
     print("\n" + "=" * 80)
     print("Processing complete!")
     print("=" * 80)
