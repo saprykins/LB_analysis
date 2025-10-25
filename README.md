@@ -84,7 +84,7 @@ Applies three filters:
 - Matches hostnames with Global Exit data
 - When multiple matches exist, applies priority rules:
   1. Type != "APP"
-  2. MigratedBy = "AXA GO"
+  2. MigratedBy = [specific value]
 - Adds columns: `entity`, `source`, `host_status`, `type`, `target`, `target_date`, `migre_date`, `decom_date`, `decomed_date`, `migrated_by`
 
 ### 6. Summary Generation
@@ -152,7 +152,7 @@ F5 File 3 (8 rows)  ─┘
 - Script also supports YYYY-MM-DD and DD-MM-YYYY formats
 
 **IP matching issues**
-- IPs in member_addrs can include port numbers (e.g., 10.37.131.136%1101)
+- IPs in member_addrs can include port numbers (e.g., [ip_address]%1101)
 - Script automatically strips port numbers before matching with CMDB
 
 ## Notes

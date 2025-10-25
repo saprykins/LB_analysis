@@ -85,7 +85,7 @@ CONFIG = {
 # ============================================================================
 
 def extract_ip_from_member_addr(addr_str):
-    """Extract IP address from member_addrs format (e.g., '10.37.131.136%1101')"""
+    """Extract IP address from member_addrs format (e.g., '[ip_address]%1101')"""
     if pd.isna(addr_str) or addr_str == '':
         return None
     # Remove port number (after % or :)
