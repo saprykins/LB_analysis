@@ -597,18 +597,26 @@ def create_summary_sheet(df, config):
                             group3 = True
                         else:
                             # Groups 4-6: In scope (Type = APP)
-                            decom_date = parse_date(row['decom_date'])
+                            decom_date_raw = row['decom_date']
                             
-                            if decom_date:
-                                # Group 4: DecomDate in future
-                                if decom_date > config['today']:
-                                    group4 = True
-                                # Group 6: DecomDate in past
-                                elif decom_date < config['today']:
-                                    group6 = True
-                            else:
+                            # Check if decom_date is empty/null
+                            if pd.isna(decom_date_raw) or decom_date_raw == '' or decom_date_raw is None:
                                 # Group 5: Type = APP, DecomDate empty
                                 group5 = True
+                            else:
+                                # Parse the date
+                                decom_date = parse_date(decom_date_raw)
+                                
+                                if decom_date:
+                                    # Group 4: DecomDate in future
+                                    if decom_date > config['today']:
+                                        group4 = True
+                                    # Group 6: DecomDate in past
+                                    elif decom_date < config['today']:
+                                        group6 = True
+                                else:
+                                    # Could not parse date, treat as empty
+                                    group5 = True
         
         summary_data.append({
             'VIP': vip,
