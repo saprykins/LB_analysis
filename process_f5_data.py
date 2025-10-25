@@ -399,77 +399,94 @@ def create_summary_sheet(df, config):
     summary_data = []
     
     for vip, group in vip_groups:
-        hostnames = group['hostname'].unique()
-        hostnames = [h for h in hostnames if h and h != '']
+        # Get all rows for this VIP
+        vip_data = group.copy()
         
-        if len(hostnames) == 0:
-            # Group 1: VIPs with no hostnames identified
-            summary_data.append({
-                'VIP': vip,
-                'Group': 'Group 1: No hostnames identified in Global Exit',
-                'Hostname_Count': 0,
-                'Hostnames': ''
-            })
-            continue
+        # Extract hostnames
+        all_hostnames = vip_data['hostname'].unique()
+        all_hostnames = [h for h in all_hostnames if h and h != '']
         
-        # Get all host statuses and decom dates for this VIP
-        vip_data = group[group['hostname'].isin(hostnames)]
-        host_statuses = vip_data['host_status'].unique()
-        decom_dates = vip_data['decom_date'].dropna()
-        types = vip_data['type'].unique()
+        # Initialize group flags
+        group0 = False  # No hostnames found in CMDB
+        group1 = False  # Hostnames found in CMDB but not in Global Exit
+        group2 = False  # All hostnames DECOM
+        group3 = False  # Running hostnames out of scope (Type != APP)
+        group4 = False  # In scope, DecomDate in future
+        group5 = False  # In scope, DecomDate empty
+        group6 = False  # In scope, DecomDate in past
         
-        # Determine group(s)
-        groups_assigned = []
-        
-        # Group 2: ALL hostnames have hostStatus = DECOM
-        if all(vip_data[vip_data['hostname'] == h]['host_status'].iloc[0] == 'DECOM' 
-               for h in hostnames if len(vip_data[vip_data['hostname'] == h]) > 0):
-            groups_assigned.append('Group 2: All hostnames DECOM')
-        
-        # Group 3: ANY hostname has hostStatus != DECOM and Type != APP
-        if any((vip_data['host_status'] != 'DECOM') & (vip_data['type'] != 'APP')):
-            groups_assigned.append('Group 3: hostStatus != DECOM, Type != APP')
-        
-        # Group 4: ANY hostname has hostStatus != DECOM and DecomDate in future
-        future_decom = False
-        for _, row in vip_data.iterrows():
-            if row['host_status'] != 'DECOM':
-                decom_date = parse_date(row['decom_date'])
-                if decom_date and decom_date > config['today']:
-                    future_decom = True
-                    break
-        if future_decom:
-            groups_assigned.append('Group 4: hostStatus != DECOM, DecomDate in future')
-        
-        # Group 5: ANY hostname has hostStatus != DECOM and DecomDate is empty
-        if any((vip_data['host_status'] != 'DECOM') & 
-               ((vip_data['decom_date'].isna()) | (vip_data['decom_date'] == ''))):
-            groups_assigned.append('Group 5: hostStatus != DECOM, DecomDate empty')
-        
-        # Group 6: ANY hostname has hostStatus != DECOM and DecomDate in past
-        past_decom = False
-        for _, row in vip_data.iterrows():
-            if row['host_status'] != 'DECOM':
-                decom_date = parse_date(row['decom_date'])
-                if decom_date and decom_date < config['today']:
-                    past_decom = True
-                    break
-        if past_decom:
-            groups_assigned.append('Group 6: hostStatus != DECOM, DecomDate in past')
-        
-        # Determine final group
-        if len(groups_assigned) == 0:
-            group_label = 'Unclassified'
-        elif len(groups_assigned) > 1:
-            group_label = 'Multiple Groups: ' + '; '.join(groups_assigned)
+        if len(all_hostnames) == 0:
+            # Group 0: No hostnames found in CMDB
+            group0 = True
         else:
-            group_label = groups_assigned[0]
+            # Check which hostnames were found in Global Exit (have entity/type data)
+            hostnames_in_ge = []
+            hostnames_not_in_ge = []
+            
+            for hostname in all_hostnames:
+                hostname_rows = vip_data[vip_data['hostname'] == hostname]
+                # Check if found in Global Exit (entity or type should be populated)
+                if hostname_rows.iloc[0]['entity'] or hostname_rows.iloc[0]['type']:
+                    hostnames_in_ge.append(hostname)
+                else:
+                    hostnames_not_in_ge.append(hostname)
+            
+            # Group 1: Hostnames found in CMDB but not in Global Exit
+            if len(hostnames_not_in_ge) > 0:
+                group1 = True
+            
+            # For hostnames found in Global Exit, check their status
+            if len(hostnames_in_ge) > 0:
+                ge_data = vip_data[vip_data['hostname'].isin(hostnames_in_ge)]
+                
+                # Group 2: ALL hostnames found in GE are DECOM (case-insensitive)
+                all_decom = True
+                for hostname in hostnames_in_ge:
+                    hostname_row = ge_data[ge_data['hostname'] == hostname].iloc[0]
+                    host_status = str(hostname_row['host_status']).strip().upper()
+                    if host_status != 'DECOM':
+                        all_decom = False
+                        break
+                
+                if all_decom:
+                    group2 = True
+                
+                # Groups 3-6: Check running hostnames (hostStatus != DECOM)
+                for _, row in ge_data.iterrows():
+                    host_status = str(row['host_status']).strip().upper()
+                    
+                    if host_status != 'DECOM':
+                        hostname_type = str(row['type']).strip().upper()
+                        
+                        # Group 3: Running hostname with Type != APP (Tech servers)
+                        if hostname_type != 'APP':
+                            group3 = True
+                        else:
+                            # Groups 4-6: In scope (Type = APP)
+                            decom_date = parse_date(row['decom_date'])
+                            
+                            if decom_date:
+                                # Group 4: DecomDate in future
+                                if decom_date > config['today']:
+                                    group4 = True
+                                # Group 6: DecomDate in past
+                                elif decom_date < config['today']:
+                                    group6 = True
+                            else:
+                                # Group 5: DecomDate empty
+                                group5 = True
         
         summary_data.append({
             'VIP': vip,
-            'Group': group_label,
-            'Hostname_Count': len(hostnames),
-            'Hostnames': ', '.join(hostnames)
+            'Hostname_Count': len(all_hostnames),
+            'Hostnames': ', '.join(all_hostnames),
+            'Group0': 'X' if group0 else '',
+            'Group1': 'X' if group1 else '',
+            'Group2': 'X' if group2 else '',
+            'Group3': 'X' if group3 else '',
+            'Group4': 'X' if group4 else '',
+            'Group5': 'X' if group5 else '',
+            'Group6': 'X' if group6 else ''
         })
     
     summary_df = pd.DataFrame(summary_data)
