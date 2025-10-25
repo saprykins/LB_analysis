@@ -23,7 +23,7 @@ CONFIG = {
     # Input files
     'f5_pattern': 'f5*.xlsx',  # Pattern to match F5 source files
     'cmdb_file': 'cmdb_ci_server_full.csv',
-    'global_exit_file': '__Global_exit_units.xlsx',
+    'global_exit_file': '__Global_exit_units_.xlsx',
     'global_exit_sheet': 'Worksheet',
     
     # Output file
@@ -262,7 +262,7 @@ def enrich_with_cmdb(df, config):
     cols = config['f5_columns']
     df['extracted_ip'] = df[cols['member_addrs']].apply(extract_ip_from_member_addr)
     
-    # Create lookup dictionary from CMDB
+    # Create lookup dictionary from CMDB (case-insensitive for IPs)
     # Handle multiple IPs in the same cell (separated by ", ")
     cmdb_cols = config['cmdb_columns']
     cmdb_lookup = {}
@@ -270,7 +270,7 @@ def enrich_with_cmdb(df, config):
         ip_field = str(row[cmdb_cols['ip_address']]).strip()
         if ip_field and ip_field != 'nan':
             # Split by comma and process each IP
-            ips = [ip.strip() for ip in ip_field.split(',')]
+            ips = [ip.strip().lower() for ip in ip_field.split(',')]
             for ip in ips:
                 if ip:
                     cmdb_lookup[ip] = {
@@ -280,9 +280,9 @@ def enrich_with_cmdb(df, config):
     
     print(f"  Created CMDB lookup with {len(cmdb_lookup)} unique IPs")
     
-    # Enrich
-    df['hostname'] = df['extracted_ip'].apply(lambda x: cmdb_lookup.get(x, {}).get('hostname', ''))
-    df['install_status'] = df['extracted_ip'].apply(lambda x: cmdb_lookup.get(x, {}).get('install_status', ''))
+    # Enrich (convert extracted IP to lowercase for matching)
+    df['hostname'] = df['extracted_ip'].apply(lambda x: cmdb_lookup.get(x.lower() if x else '', {}).get('hostname', ''))
+    df['install_status'] = df['extracted_ip'].apply(lambda x: cmdb_lookup.get(x.lower() if x else '', {}).get('install_status', ''))
     
     matched = df['hostname'].notna() & (df['hostname'] != '')
     print(f"  Matched {matched.sum()} rows with CMDB ({matched.sum()/len(df)*100:.1f}%)")
@@ -301,11 +301,11 @@ def enrich_with_global_exit(df, config):
     )
     print(f"  Loaded Global Exit with {len(global_exit_df)} rows")
     
-    # Create lookup dictionary (hostname -> list of matching rows)
+    # Create lookup dictionary (hostname -> list of matching rows) - case-insensitive
     ge_cols = config['global_exit_columns']
     global_exit_lookup = {}
     for idx, row in global_exit_df.iterrows():
-        hostname = str(row[ge_cols['hostname']]).strip()
+        hostname = str(row[ge_cols['hostname']]).strip().lower()
         if hostname and hostname != 'nan':
             if hostname not in global_exit_lookup:
                 global_exit_lookup[hostname] = []
@@ -324,14 +324,16 @@ def enrich_with_global_exit(df, config):
     # Track hostnames not found
     hostnames_not_found = set()
     
-    # Enrich each row
+    # Enrich each row (case-insensitive hostname matching)
     for idx, row in df.iterrows():
         hostname = row['hostname']
         if not hostname or hostname == '':
             continue
         
-        if hostname in global_exit_lookup:
-            matches = pd.DataFrame(global_exit_lookup[hostname])
+        hostname_lower = str(hostname).strip().lower()
+        
+        if hostname_lower in global_exit_lookup:
+            matches = pd.DataFrame(global_exit_lookup[hostname_lower])
             best_match = select_best_global_exit_match(matches, config)
             
             if best_match is not None:
