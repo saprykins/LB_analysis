@@ -23,7 +23,7 @@ CONFIG = {
     # Input files
     'f5_pattern': 'f5*.xlsx',  # Pattern to match F5 source files
     'cmdb_file': 'cmdb_ci_server_full.csv',
-    'global_exit_file': '__Global_exit_unit.xlsx',
+    'global_exit_file': '__Global_exit_units.xlsx',
     'global_exit_sheet': 'Worksheet',
     
     # Output file
@@ -51,14 +51,14 @@ CONFIG = {
         'hostname': 'Hostname',
         'entity': 'Entity',
         'source': 'Source',
-        'host_status': 'HostStatus',
+        'host_status': 'hostStatus',
         'type': 'Type',
         'target': 'Target',
         'target_date': 'TargetDate',
         'migre_date': 'MigreDate',
         'decom_date': 'DecomDate',
         'decomed_date': 'DecomedDate',
-        'migrated_by': 'MigratedBy'
+        'migrated_by': 'MigrateBy'
     },
     
     # Filters
@@ -263,15 +263,22 @@ def enrich_with_cmdb(df, config):
     df['extracted_ip'] = df[cols['member_addrs']].apply(extract_ip_from_member_addr)
     
     # Create lookup dictionary from CMDB
+    # Handle multiple IPs in the same cell (separated by ", ")
     cmdb_cols = config['cmdb_columns']
     cmdb_lookup = {}
     for _, row in cmdb_df.iterrows():
-        ip = str(row[cmdb_cols['ip_address']]).strip()
-        if ip and ip != 'nan':
-            cmdb_lookup[ip] = {
-                'hostname': row[cmdb_cols['hostname']],
-                'install_status': row[cmdb_cols['install_status']]
-            }
+        ip_field = str(row[cmdb_cols['ip_address']]).strip()
+        if ip_field and ip_field != 'nan':
+            # Split by comma and process each IP
+            ips = [ip.strip() for ip in ip_field.split(',')]
+            for ip in ips:
+                if ip:
+                    cmdb_lookup[ip] = {
+                        'hostname': row[cmdb_cols['hostname']],
+                        'install_status': row[cmdb_cols['install_status']]
+                    }
+    
+    print(f"  Created CMDB lookup with {len(cmdb_lookup)} unique IPs")
     
     # Enrich
     df['hostname'] = df['extracted_ip'].apply(lambda x: cmdb_lookup.get(x, {}).get('hostname', ''))
