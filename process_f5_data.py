@@ -586,18 +586,20 @@ def create_summary_sheet(df, config):
                     group2 = True
                 
                 # Groups 3-6: Check running hostnames (hostStatus != DECOM)
-                for _, row in ge_data.iterrows():
-                    host_status = str(row['host_status']).strip().upper()
+                # Process each unique hostname only once
+                for hostname in hostnames_in_ge:
+                    hostname_row = ge_data[ge_data['hostname'] == hostname].iloc[0]
+                    host_status = str(hostname_row['host_status']).strip().upper()
                     
                     if host_status != 'DECOM':
-                        hostname_type = str(row['type']).strip().upper()
+                        hostname_type = str(hostname_row['type']).strip().upper()
                         
                         # Group 3: Running hostname with Type != APP (Tech servers)
                         if hostname_type != 'APP':
                             group3 = True
                         else:
                             # Groups 4-6: In scope (Type = APP)
-                            decom_date_raw = row['decom_date']
+                            decom_date_raw = hostname_row['decom_date']
                             
                             # Check if decom_date is empty/null
                             if pd.isna(decom_date_raw) or decom_date_raw == '' or decom_date_raw is None:
