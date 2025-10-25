@@ -396,6 +396,48 @@ def enrich_with_global_exit(df, config):
     return df, hostnames_not_found
 
 
+def create_group_detail_sheets(df, summary_df, config):
+    """Create detailed sheets for each group showing hostnames and VIPs"""
+    print("\nStep 8: Creating group detail sheets...")
+    
+    group_details = {}
+    cols = config['f5_columns']
+    vip_col = cols['vip']
+    
+    # For each group, collect VIPs and their hostnames
+    group_cols = ['No_CMDB', 'No_GlobalExit', 'All_DECOM', 'Tech_Servers', 
+                  'Planned', 'No_DecomDate', 'Overdue']
+    
+    for group_col in group_cols:
+        # Get VIPs in this group
+        vips_in_group = summary_df[summary_df[group_col] == 'X']['VIP'].tolist()
+        
+        if vips_in_group:
+            # Get all rows for these VIPs
+            group_data = df[df[vip_col].isin(vips_in_group)].copy()
+            
+            # Select relevant columns
+            detail_cols = [vip_col, 'hostname', 'extracted_ip', 'host_status', 'type', 
+                          'decom_date', 'entity', 'source', 'install_status']
+            
+            # Only include columns that exist
+            available_cols = [col for col in detail_cols if col in group_data.columns]
+            group_detail_df = group_data[available_cols].copy()
+            
+            # Remove duplicates and sort
+            group_detail_df = group_detail_df.drop_duplicates()
+            group_detail_df = group_detail_df.sort_values(by=[vip_col, 'hostname'])
+            
+            group_details[group_col] = group_detail_df
+            print(f"  {group_col}: {len(vips_in_group)} VIPs, {len(group_detail_df)} rows")
+        else:
+            # Create empty dataframe with headers
+            group_details[group_col] = pd.DataFrame(columns=[vip_col, 'hostname'])
+            print(f"  {group_col}: 0 VIPs")
+    
+    return group_details
+
+
 def create_visualizations(summary_df, config):
     """Create visualization charts for VIP group analysis"""
     if not VISUALIZATION_AVAILABLE:
@@ -626,8 +668,11 @@ def main():
         'Hostname': sorted(list(hostnames_not_found))
     })
     
+    # Create detailed group breakdown sheets
+    group_details = create_group_detail_sheets(df_step5, summary_df, config)
+    
     # Write to Excel with multiple sheets
-    print("\nStep 8: Writing output to Excel...")
+    print("\nStep 9: Writing output to Excel...")
     with pd.ExcelWriter(config['output_file'], engine='openpyxl') as writer:
         df_step1.to_excel(writer, sheet_name='1_After_Append', index=False)
         df_step2.to_excel(writer, sheet_name='2_After_Filters', index=False)
@@ -636,6 +681,15 @@ def main():
         ips_not_found_df.to_excel(writer, sheet_name='5_IPs_Not_Found_CMDB', index=False)
         hostnames_not_found_df.to_excel(writer, sheet_name='6_Hostnames_Not_Found_GE', index=False)
         summary_df.to_excel(writer, sheet_name='7_Summary', index=False)
+        
+        # Write group detail sheets
+        group_details['No_CMDB'].to_excel(writer, sheet_name='8_Detail_No_CMDB', index=False)
+        group_details['No_GlobalExit'].to_excel(writer, sheet_name='9_Detail_No_GlobalExit', index=False)
+        group_details['All_DECOM'].to_excel(writer, sheet_name='10_Detail_All_DECOM', index=False)
+        group_details['Tech_Servers'].to_excel(writer, sheet_name='11_Detail_Tech_Servers', index=False)
+        group_details['Planned'].to_excel(writer, sheet_name='12_Detail_Planned', index=False)
+        group_details['No_DecomDate'].to_excel(writer, sheet_name='13_Detail_No_DecomDate', index=False)
+        group_details['Overdue'].to_excel(writer, sheet_name='14_Detail_Overdue', index=False)
     
     print(f"\n✓ Output written to: {config['output_file']}")
     print("\nSheets created:")
@@ -646,6 +700,7 @@ def main():
     print("  5. 5_IPs_Not_Found_CMDB - IPs not found in CMDB")
     print("  6. 6_Hostnames_Not_Found_GE - Hostnames not found in Global Exit")
     print("  7. 7_Summary - VIP summary by groups")
+    print("  8-14. Detail sheets for each group (VIPs and hostnames)")
     print("\n" + "=" * 80)
     print("Processing complete!")
     print("=" * 80)
