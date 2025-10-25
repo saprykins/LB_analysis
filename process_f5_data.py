@@ -404,18 +404,31 @@ def create_visualizations(summary_df, config):
     
     print("\nStep 7: Creating visualizations...")
     
-    # Prepare data
-    group_cols = ['Group0', 'Group1', 'Group2', 'Group3', 'Group4', 'Group5', 'Group6']
+    # Prepare data - Excel column names and chart labels
+    group_mapping = {
+        'No_CMDB': 'IP not found in CMDB',
+        'No_GlobalExit': 'Hostname not in Global Exit',
+        'All_DECOM': 'All hostnames decommissioned',
+        'Tech_Servers': 'Non-APP servers',
+        'Planned': 'APP with future decom date',
+        'No_DecomDate': 'APP without decom date',
+        'Overdue': 'APP with past decom date'
+    }
+    
+    group_cols = list(group_mapping.keys())
     
     # 1. Bar Chart - Count of VIPs per group
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(14, 7))
     group_counts = {}
+    chart_labels = []
     for col in group_cols:
         count = (summary_df[col] == 'X').sum()
         group_counts[col] = count
+        chart_labels.append(group_mapping[col])
     
     colors = ['#e74c3c', '#e67e22', '#2ecc71', '#3498db', '#9b59b6', '#f39c12', '#1abc9c']
-    bars = plt.bar(group_counts.keys(), group_counts.values(), color=colors, edgecolor='black', linewidth=1.5)
+    bars = plt.bar(range(len(chart_labels)), list(group_counts.values()), 
+                   color=colors, edgecolor='black', linewidth=1.5)
     
     # Add value labels on bars
     for bar in bars:
@@ -424,10 +437,9 @@ def create_visualizations(summary_df, config):
                 f'{int(height)}',
                 ha='center', va='bottom', fontsize=12, fontweight='bold')
     
-    plt.xlabel('Groups', fontsize=12, fontweight='bold')
+    plt.xticks(range(len(chart_labels)), chart_labels, rotation=15, ha='right', fontsize=10)
     plt.ylabel('Number of VIPs', fontsize=12, fontweight='bold')
     plt.title('VIP Distribution Across Groups', fontsize=14, fontweight='bold', pad=20)
-    plt.xticks(rotation=0, fontsize=11)
     plt.yticks(fontsize=11)
     plt.grid(axis='y', alpha=0.3, linestyle='--')
     plt.tight_layout()
@@ -435,52 +447,26 @@ def create_visualizations(summary_df, config):
     plt.close()
     print("  Created: vip_group_distribution.png")
     
-    # 2. Heatmap - VIP membership matrix (top 50 VIPs if too many)
-    vips_to_show = min(50, len(summary_df))
-    heatmap_data = summary_df.head(vips_to_show)[group_cols].copy()
-    heatmap_data = heatmap_data.replace('X', 1).replace('', 0)
-    
-    plt.figure(figsize=(10, max(8, vips_to_show * 0.3)))
-    sns.heatmap(heatmap_data, 
-                cmap=['white', '#2ecc71'], 
-                cbar=False,
-                linewidths=0.5,
-                linecolor='gray',
-                xticklabels=group_cols,
-                yticklabels=summary_df.head(vips_to_show)['VIP'].values,
-                square=False)
-    
-    plt.xlabel('Groups', fontsize=12, fontweight='bold')
-    plt.ylabel('VIPs', fontsize=12, fontweight='bold')
-    plt.title(f'VIP Group Membership Matrix (Top {vips_to_show} VIPs)', 
-              fontsize=14, fontweight='bold', pad=20)
-    plt.xticks(rotation=0, fontsize=10)
-    plt.yticks(fontsize=8)
-    plt.tight_layout()
-    plt.savefig('vip_group_heatmap.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    print("  Created: vip_group_heatmap.png")
-    
-    # 3. UpSet Plot - Group intersections
+    # 2. UpSet Plot - Group intersections
     try:
-        # Prepare data for UpSet plot
+        # Prepare data for UpSet plot - use chart labels
         memberships = []
         for _, row in summary_df.iterrows():
-            groups = [col for col in group_cols if row[col] == 'X']
+            groups = [group_mapping[col] for col in group_cols if row[col] == 'X']
             if groups:
                 memberships.append(groups)
         
         if memberships:
             upset_data = from_memberships(memberships)
             
-            plt.figure(figsize=(14, 8))
+            plt.figure(figsize=(16, 9))
             upset = UpSet(upset_data, 
                          subset_size='count',
                          show_counts=True,
                          element_size=40,
-                         intersection_plot_elements=6)
+                         intersection_plot_elements=10)
             upset.plot()
-            plt.suptitle('VIP Group Intersections (UpSet Plot)', 
+            plt.suptitle('VIP Group Intersections', 
                         fontsize=14, fontweight='bold', y=0.98)
             plt.tight_layout()
             plt.savefig('vip_group_upset.png', dpi=300, bbox_inches='tight')
@@ -488,33 +474,6 @@ def create_visualizations(summary_df, config):
             print("  Created: vip_group_upset.png")
     except Exception as e:
         print(f"  Warning: Could not create UpSet plot: {e}")
-    
-    # 4. Pie Chart - VIPs by number of groups they belong to
-    plt.figure(figsize=(10, 8))
-    group_membership_counts = {}
-    for _, row in summary_df.iterrows():
-        num_groups = sum(1 for col in group_cols if row[col] == 'X')
-        group_membership_counts[num_groups] = group_membership_counts.get(num_groups, 0) + 1
-    
-    labels = [f'{k} group{"s" if k != 1 else ""}' for k in sorted(group_membership_counts.keys())]
-    sizes = [group_membership_counts[k] for k in sorted(group_membership_counts.keys())]
-    colors_pie = plt.cm.Set3(range(len(sizes)))
-    
-    wedges, texts, autotexts = plt.pie(sizes, labels=labels, colors=colors_pie,
-                                        autopct='%1.1f%%', startangle=90,
-                                        textprops={'fontsize': 11})
-    
-    # Make percentage text bold
-    for autotext in autotexts:
-        autotext.set_color('white')
-        autotext.set_fontweight('bold')
-        autotext.set_fontsize(12)
-    
-    plt.title('VIPs by Number of Group Memberships', fontsize=14, fontweight='bold', pad=20)
-    plt.tight_layout()
-    plt.savefig('vip_group_membership_distribution.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    print("  Created: vip_group_membership_distribution.png")
     
     print("\n  All visualizations saved successfully!")
 
@@ -613,13 +572,13 @@ def create_summary_sheet(df, config):
             'VIP': vip,
             'Hostname_Count': len(all_hostnames),
             'Hostnames': ', '.join(all_hostnames),
-            'Group0': 'X' if group0 else '',
-            'Group1': 'X' if group1 else '',
-            'Group2': 'X' if group2 else '',
-            'Group3': 'X' if group3 else '',
-            'Group4': 'X' if group4 else '',
-            'Group5': 'X' if group5 else '',
-            'Group6': 'X' if group6 else ''
+            'No_CMDB': 'X' if group0 else '',
+            'No_GlobalExit': 'X' if group1 else '',
+            'All_DECOM': 'X' if group2 else '',
+            'Tech_Servers': 'X' if group3 else '',
+            'Planned': 'X' if group4 else '',
+            'No_DecomDate': 'X' if group5 else '',
+            'Overdue': 'X' if group6 else ''
         })
     
     summary_df = pd.DataFrame(summary_data)
