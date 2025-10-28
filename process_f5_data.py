@@ -53,7 +53,8 @@ CONFIG = {
     'cmdb_columns': {
         'hostname': 'hostname',
         'ip_address': 'ip_address',
-        'install_status': 'install_status'
+        'install_status': 'install_status',
+        'assignment_group': 'assignment_group'
     },
     
     # Column names in Global Exit file
@@ -327,7 +328,8 @@ def enrich_with_cmdb(df, config):
                 if ip:
                     cmdb_lookup[ip] = {
                         'hostname': row[cmdb_cols['hostname']],
-                        'install_status': row[cmdb_cols['install_status']]
+                        'install_status': row[cmdb_cols['install_status']],
+                        'assignment_group': row[cmdb_cols['assignment_group']]
                     }
     
     print(f"  Created CMDB lookup with {len(cmdb_lookup)} unique IPs")
@@ -353,8 +355,15 @@ def enrich_with_cmdb(df, config):
         ip_lower = ip.lower()
         return cmdb_lookup.get(ip_lower, {}).get('install_status', '')
     
+    def get_assignment_group(ip):
+        if not ip:
+            return ''
+        ip_lower = ip.lower()
+        return cmdb_lookup.get(ip_lower, {}).get('assignment_group', '')
+    
     df['hostname'] = df['extracted_ip'].apply(get_hostname)
     df['install_status'] = df['extracted_ip'].apply(get_install_status)
+    df['assignment_group'] = df['extracted_ip'].apply(get_assignment_group)
     
     matched = df['hostname'].notna() & (df['hostname'] != '')
     print(f"  Matched {matched.sum()} rows with CMDB ({matched.sum()/len(df)*100:.1f}%)")
@@ -764,10 +773,26 @@ def main():
         'IP_Address': sorted(list(ips_not_found))
     })
     
-    # Create hostnames not found sheet
-    hostnames_not_found_df = pd.DataFrame({
-        'Hostname': sorted(list(hostnames_not_found))
-    })
+    # Create hostnames not found sheet with install_status and assignment_group
+    hostnames_not_found_list = []
+    for hostname in sorted(list(hostnames_not_found)):
+        # Get the first row with this hostname to extract install_status and assignment_group
+        hostname_rows = df_step5[df_step5['hostname'] == hostname]
+        if len(hostname_rows) > 0:
+            first_row = hostname_rows.iloc[0]
+            hostnames_not_found_list.append({
+                'Hostname': hostname,
+                'install_status': first_row.get('install_status', ''),
+                'assignment_group': first_row.get('assignment_group', '')
+            })
+        else:
+            hostnames_not_found_list.append({
+                'Hostname': hostname,
+                'install_status': '',
+                'assignment_group': ''
+            })
+    
+    hostnames_not_found_df = pd.DataFrame(hostnames_not_found_list)
     
     # Create detailed group breakdown sheets
     group_details = create_group_detail_sheets(df_step5, summary_df, config)
