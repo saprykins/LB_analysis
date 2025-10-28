@@ -233,10 +233,10 @@ def apply_filters(df, config):
     df = df[df[cols['vip_availability']] == filters['vip_availability']]
     print(f"\n  After VIP availability filter ('{filters['vip_availability']}'): {len(df)} rows (removed {count_before - len(df)})")
     
-    # Filter 2: Environment = "CoreIT"
+    # Filter 2: Environment = "CoreIT" or "COREIT" (case-insensitive)
     count_before = len(df)
-    df = df[df[cols['environment']] == filters['environment']]
-    print(f"  After Environment filter ('{filters['environment']}'): {len(df)} rows (removed {count_before - len(df)})")
+    df = df[df[cols['environment']].str.upper() == filters['environment'].upper()]
+    print(f"  After Environment filter ('{filters['environment']}' - case-insensitive): {len(df)} rows (removed {count_before - len(df)})")
     
     # Filter 3: VIP Destination not in range 0.0.0.0 to 0.0.0.53
     count_before = len(df)
