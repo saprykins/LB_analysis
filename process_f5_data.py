@@ -416,6 +416,71 @@ def create_group_detail_sheets(df, summary_df, config):
             # Get all rows for these VIPs
             group_data = df[df[vip_col].isin(vips_in_group)].copy()
             
+            # Apply group-specific filters to show only relevant hostnames
+            if group_col == 'No_CMDB':
+                # Show rows with no hostname (IP not found in CMDB)
+                group_data = group_data[(group_data['hostname'].isna()) | (group_data['hostname'] == '')]
+            
+            elif group_col == 'No_GlobalExit':
+                # Show rows with hostname but no entity/type (not found in Global Exit)
+                group_data = group_data[
+                    (group_data['hostname'].notna()) & 
+                    (group_data['hostname'] != '') &
+                    ((group_data['entity'].isna()) | (group_data['entity'] == '')) &
+                    ((group_data['type'].isna()) | (group_data['type'] == ''))
+                ]
+            
+            elif group_col == 'All_DECOM':
+                # Show rows where host_status = DECOM
+                group_data = group_data[group_data['host_status'].str.upper() == 'DECOM']
+            
+            elif group_col == 'Tech_Servers':
+                # Show rows where host_status != DECOM and Type != APP
+                group_data = group_data[
+                    (group_data['host_status'].str.upper() != 'DECOM') &
+                    (group_data['type'].str.upper() != 'APP')
+                ]
+            
+            elif group_col == 'Planned':
+                # Show rows where Type = APP, host_status != DECOM, and DecomDate in future
+                group_data = group_data[
+                    (group_data['type'].str.upper() == 'APP') &
+                    (group_data['host_status'].str.upper() != 'DECOM') &
+                    (group_data['decom_date'].notna()) &
+                    (group_data['decom_date'] != '')
+                ]
+                # Filter by future dates
+                future_rows = []
+                for idx, row in group_data.iterrows():
+                    decom_date = parse_date(row['decom_date'])
+                    if decom_date and decom_date > config['today']:
+                        future_rows.append(idx)
+                group_data = group_data.loc[future_rows] if future_rows else pd.DataFrame(columns=group_data.columns)
+            
+            elif group_col == 'No_DecomDate':
+                # Show rows where Type = APP, host_status != DECOM, and DecomDate is empty
+                group_data = group_data[
+                    (group_data['type'].str.upper() == 'APP') &
+                    (group_data['host_status'].str.upper() != 'DECOM') &
+                    ((group_data['decom_date'].isna()) | (group_data['decom_date'] == ''))
+                ]
+            
+            elif group_col == 'Overdue':
+                # Show rows where Type = APP, host_status != DECOM, and DecomDate in past
+                group_data = group_data[
+                    (group_data['type'].str.upper() == 'APP') &
+                    (group_data['host_status'].str.upper() != 'DECOM') &
+                    (group_data['decom_date'].notna()) &
+                    (group_data['decom_date'] != '')
+                ]
+                # Filter by past dates
+                past_rows = []
+                for idx, row in group_data.iterrows():
+                    decom_date = parse_date(row['decom_date'])
+                    if decom_date and decom_date < config['today']:
+                        past_rows.append(idx)
+                group_data = group_data.loc[past_rows] if past_rows else pd.DataFrame(columns=group_data.columns)
+            
             # Select relevant columns
             detail_cols = [vip_col, 'hostname', 'extracted_ip', 'host_status', 'type', 
                           'decom_date', 'entity', 'source', 'install_status']
