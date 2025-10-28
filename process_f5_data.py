@@ -222,18 +222,39 @@ def apply_filters(df, config):
     cols = config['f5_columns']
     filters = config['filters']
     
+    # Debug: Show unique values before filtering
+    print(f"\n  DEBUG - Unique values in '{cols['vip_availability']}':")
+    print(f"    {df[cols['vip_availability']].unique()[:10]}")
+    print(f"  DEBUG - Unique values in '{cols['environment']}':")
+    print(f"    {df[cols['environment']].unique()[:10]}")
+    
     # Filter 1: VIP availability = "available"
+    count_before = len(df)
     df = df[df[cols['vip_availability']] == filters['vip_availability']]
-    print(f"  After VIP availability filter: {len(df)} rows (removed {initial_count - len(df)})")
+    print(f"\n  After VIP availability filter ('{filters['vip_availability']}'): {len(df)} rows (removed {count_before - len(df)})")
     
     # Filter 2: Environment = "CoreIT"
     count_before = len(df)
     df = df[df[cols['environment']] == filters['environment']]
-    print(f"  After Environment filter: {len(df)} rows (removed {count_before - len(df)})")
+    print(f"  After Environment filter ('{filters['environment']}'): {len(df)} rows (removed {count_before - len(df)})")
     
     # Filter 3: VIP Destination not in range 0.0.0.0 to 0.0.0.53
     count_before = len(df)
     df['_temp_vip_dest_ip'] = df[cols['vip_destination']].apply(extract_ip_from_member_addr)
+    
+    # Debug: Show sample IPs and which are in range
+    print(f"\n  DEBUG - Sample VIP Destination IPs:")
+    sample_ips = df['_temp_vip_dest_ip'].dropna().head(10).tolist()
+    for ip in sample_ips:
+        in_range = is_ip_in_range(ip, filters['ip_range_start'], filters['ip_range_end'])
+        print(f"    {ip} - In range: {in_range}")
+    
+    # Count how many are in the excluded range
+    in_range_count = df['_temp_vip_dest_ip'].apply(
+        lambda x: is_ip_in_range(x, filters['ip_range_start'], filters['ip_range_end'])
+    ).sum()
+    print(f"  DEBUG - IPs in excluded range {filters['ip_range_start']} to {filters['ip_range_end']}: {in_range_count}")
+    
     df = df[~df['_temp_vip_dest_ip'].apply(
         lambda x: is_ip_in_range(x, filters['ip_range_start'], filters['ip_range_end'])
     )]
