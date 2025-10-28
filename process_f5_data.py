@@ -238,7 +238,12 @@ def apply_filters(df, config):
     df = df[df[cols['environment']].str.upper() == filters['environment'].upper()]
     print(f"  After Environment filter ('{filters['environment']}' - case-insensitive): {len(df)} rows (removed {count_before - len(df)})")
     
-    # Filter 3: VIP Destination not in range 0.0.0.0 to 0.0.0.53
+    # Filter 3: member_addrs not empty
+    count_before = len(df)
+    df = df[(df[cols['member_addrs']].notna()) & (df[cols['member_addrs']] != '')]
+    print(f"  After member_addrs not empty filter: {len(df)} rows (removed {count_before - len(df)})")
+    
+    # Filter 4: VIP Destination not in range 0.0.0.0 to 0.0.0.53
     count_before = len(df)
     df['_temp_vip_dest_ip'] = df[cols['vip_destination']].apply(extract_ip_from_member_addr)
     
