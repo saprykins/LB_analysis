@@ -174,13 +174,31 @@ def select_best_global_exit_match(matches_df, config):
     if len(type_not_app) > 0:
         matches_df = type_not_app
     
-    # Priority 2: MigratedBy = AXA GO
+    # Priority 2: MigratedBy = configured value
     migrated_by_col = config['global_exit_columns']['migrated_by']
-    migrated_by_axa = matches_df[matches_df[migrated_by_col] == config['priority_rules']['migrated_by_equal']]
-    if len(migrated_by_axa) > 0:
-        return migrated_by_axa.iloc[0]
+    migrated_by_match = matches_df[matches_df[migrated_by_col] == config['priority_rules']['migrated_by_equal']]
+    if len(migrated_by_match) > 0:
+        matches_df = migrated_by_match
     
-    # Return first match if no priority matches
+    # Priority 3 (Fallback): Select row with latest DecomDate
+    decom_date_col = config['global_exit_columns']['decom_date']
+    
+    # Parse dates and find the latest
+    latest_date = None
+    latest_row = None
+    
+    for idx, row in matches_df.iterrows():
+        decom_date = parse_date(row[decom_date_col])
+        if decom_date:
+            if latest_date is None or decom_date > latest_date:
+                latest_date = decom_date
+                latest_row = row
+    
+    # If we found a row with a valid date, return it
+    if latest_row is not None:
+        return latest_row
+    
+    # Otherwise return first match
     return matches_df.iloc[0]
 
 
