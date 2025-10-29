@@ -62,7 +62,7 @@ CONFIG = {
         'hostname': 'Hostname',
         'entity': 'Entity',
         'source': 'Source',
-        'host_status': 'hostStatus',
+        'host_status': 'effortStatus',
         'type': 'Type',
         'target': 'Target',
         'target_date': 'TargetDate',
@@ -619,16 +619,36 @@ def create_visualizations(summary_df, config):
         if memberships:
             upset_data = from_memberships(memberships)
             
-            plt.figure(figsize=(16, 9))
+            fig = plt.figure(figsize=(18, 10))
             upset = UpSet(upset_data, 
                          subset_size='count',
                          show_counts=True,
                          element_size=40,
                          intersection_plot_elements=10)
             upset.plot()
+            
+            # Add title
             plt.suptitle('VIP Group Intersections', 
-                        fontsize=14, fontweight='bold', y=0.98)
-            plt.tight_layout()
+                        fontsize=16, fontweight='bold', y=0.96)
+            
+            # Add explanation text box
+            explanation_text = (
+                "How to read this chart:\n"
+                "• Rows (left): Individual groups\n"
+                "• Columns (bottom): Group combinations\n"
+                "  - Single dot = VIPs in only that group\n"
+                "  - Connected dots = VIPs in multiple groups\n"
+                "• Bar height: Number of VIPs in that combination\n"
+                "• Shows the 10 most common combinations"
+            )
+            
+            fig.text(0.02, 0.02, explanation_text, 
+                    fontsize=9, 
+                    verticalalignment='bottom',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3),
+                    family='monospace')
+            
+            plt.tight_layout(rect=[0, 0.08, 1, 0.95])
             plt.savefig('vip_group_upset.png', dpi=300, bbox_inches='tight')
             plt.close()
             print("  Created: vip_group_upset.png")
