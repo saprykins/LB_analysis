@@ -449,6 +449,141 @@ def enrich_with_global_exit(df, config):
     return df, hostnames_not_found
 
 
+def create_treatment_summary(df_step1, df_step2, df_step3, df_step5, ips_not_found, hostnames_not_found, config):
+    """Create treatment summary with processing statistics"""
+    print("\nStep 8b: Creating treatment summary...")
+    
+    cols = config['f5_columns']
+    
+    # Calculate statistics
+    total_after_append = len(df_step1)
+    removed_availability = total_after_append - len(df_step2[df_step2[cols['vip_availability']] == config['filters']['vip_availability']])
+    
+    # Recalculate each filter step
+    temp_df = df_step1.copy()
+    after_avail = len(temp_df[temp_df[cols['vip_availability']] == config['filters']['vip_availability']])
+    removed_availability = total_after_append - after_avail
+    
+    temp_df = temp_df[temp_df[cols['vip_availability']] == config['filters']['vip_availability']]
+    after_env = len(temp_df[temp_df[cols['environment']].str.upper() == config['filters']['environment'].upper()])
+    removed_environment = after_avail - after_env
+    
+    temp_df = temp_df[temp_df[cols['environment']].str.upper() == config['filters']['environment'].upper()]
+    after_member = len(temp_df[(temp_df[cols['member_addrs']].notna()) & (temp_df[cols['member_addrs']] != '')])
+    removed_member_empty = after_env - after_member
+    
+    temp_df = temp_df[(temp_df[cols['member_addrs']].notna()) & (temp_df[cols['member_addrs']] != '')]
+    temp_df['_temp_ip'] = temp_df[cols['vip_destination']].apply(extract_ip_from_member_addr)
+    after_ip_range = len(temp_df[~temp_df['_temp_ip'].apply(
+        lambda x: is_ip_in_range(x, config['filters']['ip_range_start'], config['filters']['ip_range_end'])
+    )])
+    removed_ip_range = after_member - after_ip_range
+    
+    filtered_stays = len(df_step2)
+    after_expansion = len(df_step3)
+    
+    # Table 1: VIPs
+    table1_data = [
+        ['=== TABLE 1: VIPs ===', ''],
+        ['Total VIPs after append', total_after_append],
+        ['Removed non-available', removed_availability],
+        ['Removed non-CoreIT', removed_environment],
+        ['Removed member_addrs empty', removed_member_empty],
+        ['Removed VIP Destination in range 0.0.0.0-0.0.0.53', removed_ip_range],
+        ['Filtered - what stays', filtered_stays],
+        ['VIP lines after expansion', after_expansion],
+        ['', '']  # Empty row separator
+    ]
+    
+    # Table 2: IPs
+    unique_ips = df_step3['extracted_ip'].dropna().unique()
+    ips_in_scope = len(unique_ips)
+    ips_not_in_cmdb = len(ips_not_found)
+    hostnames_not_in_ge = len(hostnames_not_found)
+    
+    table2_data = [
+        ['=== TABLE 2: IPs ===', ''],
+        ['IPs in scope (unique)', ips_in_scope],
+        ['IPs not found in CMDB', ips_not_in_cmdb],
+        ['Hostnames not found in Global Exit', hostnames_not_in_ge],
+        ['', '']  # Empty row separator
+    ]
+    
+    # Table 3: Hostnames
+    unique_hostnames = df_step5[df_step5['hostname'].notna() & (df_step5['hostname'] != '')]['hostname'].unique()
+    num_unique_hostnames = len(unique_hostnames)
+    
+    # Hostnames decommissioned (HostStatus = DECOM, case-insensitive)
+    hostnames_decom = df_step5[
+        (df_step5['hostname'].notna()) & 
+        (df_step5['hostname'] != '') &
+        (df_step5['host_status'].str.upper() == 'DECOM')
+    ]['hostname'].nunique()
+    
+    # Non-application hostnames (Type != APP, not DECOM)
+    non_app_hostnames = df_step5[
+        (df_step5['hostname'].notna()) & 
+        (df_step5['hostname'] != '') &
+        (df_step5['host_status'].str.upper() != 'DECOM') &
+        (df_step5['type'].str.upper() != 'APP')
+    ]['hostname'].nunique()
+    
+    # DecomTarget in future (Type = APP, not DECOM, Target = DECOM, DecomDate in future)
+    future_decom_hostnames = 0
+    for hostname in unique_hostnames:
+        hostname_rows = df_step5[df_step5['hostname'] == hostname]
+        if len(hostname_rows) > 0:
+            row = hostname_rows.iloc[0]
+            if (str(row['host_status']).strip().upper() != 'DECOM' and
+                str(row['type']).strip().upper() == 'APP' and
+                str(row['target']).strip().upper() == 'DECOM'):
+                decom_date = parse_date(row['decom_date'])
+                if decom_date and decom_date > config['today']:
+                    future_decom_hostnames += 1
+    
+    # DecomTarget not defined (Type = APP, not DECOM, Target != DECOM or empty)
+    no_decom_target = 0
+    for hostname in unique_hostnames:
+        hostname_rows = df_step5[df_step5['hostname'] == hostname]
+        if len(hostname_rows) > 0:
+            row = hostname_rows.iloc[0]
+            if (str(row['host_status']).strip().upper() != 'DECOM' and
+                str(row['type']).strip().upper() == 'APP' and
+                str(row['target']).strip().upper() != 'DECOM'):
+                no_decom_target += 1
+    
+    # Hostname to Decom (Type = APP, not DECOM, Target = DECOM, DecomDate in past or today)
+    hostname_to_decom = 0
+    for hostname in unique_hostnames:
+        hostname_rows = df_step5[df_step5['hostname'] == hostname]
+        if len(hostname_rows) > 0:
+            row = hostname_rows.iloc[0]
+            if (str(row['host_status']).strip().upper() != 'DECOM' and
+                str(row['type']).strip().upper() == 'APP' and
+                str(row['target']).strip().upper() == 'DECOM'):
+                decom_date = parse_date(row['decom_date'])
+                if decom_date and decom_date <= config['today']:
+                    hostname_to_decom += 1
+    
+    table3_data = [
+        ['=== TABLE 3: Hostnames ===', ''],
+        ['Number of unique hostnames', num_unique_hostnames],
+        ['Hostnames decommissioned', hostnames_decom],
+        ['Non-application hostnames (not decom)', non_app_hostnames],
+        ['DecomTarget in future', future_decom_hostnames],
+        ['DecomTarget not defined', no_decom_target],
+        ['Hostname to Decom (overdue)', hostname_to_decom]
+    ]
+    
+    # Combine all tables
+    all_data = table1_data + table2_data + table3_data
+    
+    summary_df = pd.DataFrame(all_data, columns=['Metric', 'Value'])
+    print(f"  Created treatment summary with {len(all_data)} rows")
+    
+    return summary_df
+
+
 def create_group_detail_sheets(df, summary_df, config):
     """Create detailed sheets for each group showing hostnames and VIPs"""
     print("\nStep 8: Creating group detail sheets...")
@@ -619,62 +754,36 @@ def create_visualizations(summary_df, config):
         if memberships:
             upset_data = from_memberships(memberships)
             
-            # Get the top 10 intersections with their descriptions
-            top_intersections = upset_data.nlargest(10)
-            intersection_descriptions = []
-            for idx, (intersection, count) in enumerate(top_intersections.items(), 1):
-                groups_in_intersection = [group for group, present in zip(intersection.index, intersection) if present]
-                if len(groups_in_intersection) == 1:
-                    desc = f"Col {idx}: Only {groups_in_intersection[0]}"
-                else:
-                    desc = f"Col {idx}: " + " + ".join(groups_in_intersection)
-                intersection_descriptions.append(f"{desc} ({count} VIPs)")
-            
-            fig = plt.figure(figsize=(18, 12))
-            
-            # Create UpSet plot in upper portion
-            ax_upset = plt.subplot2grid((4, 1), (0, 0), rowspan=3)
+            fig = plt.figure(figsize=(18, 10))
             upset = UpSet(upset_data, 
                          subset_size='count',
                          show_counts=True,
                          element_size=40,
                          intersection_plot_elements=10)
-            upset.plot(fig=fig, ax=ax_upset)
+            upset.plot()
             
             # Add title
             plt.suptitle('VIP Group Intersections', 
                         fontsize=16, fontweight='bold', y=0.96)
             
-            # Add column descriptions in lower portion
-            ax_legend = plt.subplot2grid((4, 1), (3, 0))
-            ax_legend.axis('off')
-            
-            legend_text = "Column Descriptions:\n" + "\n".join(intersection_descriptions)
-            ax_legend.text(0.05, 0.95, legend_text,
-                          transform=ax_legend.transAxes,
-                          fontsize=8,
-                          verticalalignment='top',
-                          family='monospace',
-                          bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.3))
-            
             # Add explanation text box
             explanation_text = (
-                "How to read:\n"
+                "How to read this chart:\n"
                 "• Rows (left): Individual groups\n"
-                "• Columns: Group combinations (see descriptions below)\n"
-                "  - Single dot = Only that group\n"
-                "  - Connected dots = Multiple groups\n"
-                "• Bar height: Number of VIPs"
+                "• Columns (bottom): Group combinations\n"
+                "  - Single dot = VIPs in only that group\n"
+                "  - Connected dots = VIPs in multiple groups\n"
+                "• Bar height: Number of VIPs in that combination\n"
+                "• Shows the 10 most common combinations"
             )
             
-            ax_legend.text(0.75, 0.95, explanation_text,
-                          transform=ax_legend.transAxes,
-                          fontsize=8,
-                          verticalalignment='top',
-                          family='monospace',
-                          bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+            fig.text(0.02, 0.02, explanation_text, 
+                    fontsize=9, 
+                    verticalalignment='bottom',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3),
+                    family='monospace')
             
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.tight_layout(rect=[0, 0.08, 1, 0.95])
             plt.savefig('vip_group_upset.png', dpi=300, bbox_inches='tight')
             plt.close()
             print("  Created: vip_group_upset.png")
@@ -861,6 +970,12 @@ def main():
     # Create detailed group breakdown sheets
     group_details = create_group_detail_sheets(df_step5, summary_df, config)
     
+    # Create treatment summary
+    treatment_summary_df = create_treatment_summary(
+        df_step1, df_step2, df_step3, df_step5, 
+        ips_not_found, hostnames_not_found, config
+    )
+    
     # Write to Excel with multiple sheets
     print("\nStep 9: Writing output to Excel...")
     with pd.ExcelWriter(config['output_file'], engine='openpyxl') as writer:
@@ -880,6 +995,7 @@ def main():
         group_details['Planned'].to_excel(writer, sheet_name='12_Detail_Planned', index=False)
         group_details['No_DecomDate'].to_excel(writer, sheet_name='13_Detail_No_DecomDate', index=False)
         group_details['Overdue'].to_excel(writer, sheet_name='14_Detail_Overdue', index=False)
+        treatment_summary_df.to_excel(writer, sheet_name='15_Treatment_Summary', index=False)
     
     print(f"\n✓ Output written to: {config['output_file']}")
     print("\nSheets created:")
@@ -891,6 +1007,7 @@ def main():
     print("  6. 6_Hostnames_Not_Found_GE - Hostnames not found in Global Exit")
     print("  7. 7_Summary - VIP summary by groups")
     print("  8-14. Detail sheets for each group (VIPs and hostnames)")
+    print("  15. 15_Treatment_Summary - Processing statistics")
     print("\n" + "=" * 80)
     print("Processing complete!")
     print("=" * 80)
