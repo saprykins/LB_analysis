@@ -619,36 +619,62 @@ def create_visualizations(summary_df, config):
         if memberships:
             upset_data = from_memberships(memberships)
             
-            fig = plt.figure(figsize=(18, 10))
+            # Get the top 10 intersections with their descriptions
+            top_intersections = upset_data.nlargest(10)
+            intersection_descriptions = []
+            for idx, (intersection, count) in enumerate(top_intersections.items(), 1):
+                groups_in_intersection = [group for group, present in zip(intersection.index, intersection) if present]
+                if len(groups_in_intersection) == 1:
+                    desc = f"Col {idx}: Only {groups_in_intersection[0]}"
+                else:
+                    desc = f"Col {idx}: " + " + ".join(groups_in_intersection)
+                intersection_descriptions.append(f"{desc} ({count} VIPs)")
+            
+            fig = plt.figure(figsize=(18, 12))
+            
+            # Create UpSet plot in upper portion
+            ax_upset = plt.subplot2grid((4, 1), (0, 0), rowspan=3)
             upset = UpSet(upset_data, 
                          subset_size='count',
                          show_counts=True,
                          element_size=40,
                          intersection_plot_elements=10)
-            upset.plot()
+            upset.plot(fig=fig, ax=ax_upset)
             
             # Add title
             plt.suptitle('VIP Group Intersections', 
                         fontsize=16, fontweight='bold', y=0.96)
             
+            # Add column descriptions in lower portion
+            ax_legend = plt.subplot2grid((4, 1), (3, 0))
+            ax_legend.axis('off')
+            
+            legend_text = "Column Descriptions:\n" + "\n".join(intersection_descriptions)
+            ax_legend.text(0.05, 0.95, legend_text,
+                          transform=ax_legend.transAxes,
+                          fontsize=8,
+                          verticalalignment='top',
+                          family='monospace',
+                          bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.3))
+            
             # Add explanation text box
             explanation_text = (
-                "How to read this chart:\n"
+                "How to read:\n"
                 "• Rows (left): Individual groups\n"
-                "• Columns (bottom): Group combinations\n"
-                "  - Single dot = VIPs in only that group\n"
-                "  - Connected dots = VIPs in multiple groups\n"
-                "• Bar height: Number of VIPs in that combination\n"
-                "• Shows the 10 most common combinations"
+                "• Columns: Group combinations (see descriptions below)\n"
+                "  - Single dot = Only that group\n"
+                "  - Connected dots = Multiple groups\n"
+                "• Bar height: Number of VIPs"
             )
             
-            fig.text(0.02, 0.02, explanation_text, 
-                    fontsize=9, 
-                    verticalalignment='bottom',
-                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3),
-                    family='monospace')
+            ax_legend.text(0.75, 0.95, explanation_text,
+                          transform=ax_legend.transAxes,
+                          fontsize=8,
+                          verticalalignment='top',
+                          family='monospace',
+                          bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
             
-            plt.tight_layout(rect=[0, 0.08, 1, 0.95])
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
             plt.savefig('vip_group_upset.png', dpi=300, bbox_inches='tight')
             plt.close()
             print("  Created: vip_group_upset.png")
